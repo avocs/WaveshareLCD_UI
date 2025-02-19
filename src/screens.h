@@ -17,8 +17,7 @@ typedef struct _objects_t {
     lv_obj_t *botpanel;
     lv_obj_t *btn1;
     lv_obj_t *btn2;
-    lv_obj_t *btndd;
-    lv_obj_t *btnrm;
+    lv_obj_t *btnext;
     lv_obj_t *remark_window;
     lv_obj_t *rm_label;
     lv_obj_t *rm_ta;
@@ -26,20 +25,23 @@ typedef struct _objects_t {
     lv_obj_t *dd_window;
     lv_obj_t *dd_label;
     lv_obj_t *dd1;
+    lv_obj_t *dd2_label;
+    lv_obj_t *dd2;
+    lv_obj_t *rm_label_dd;
+    lv_obj_t *rm_ta_dd;
+    lv_obj_t *btncfm;
+    lv_obj_t *cfm_label;
+    lv_obj_t *retbtn;
+    lv_obj_t *subbtn;
+    lv_obj_t *cfmbox;
+
+    lv_obj_t *trigbtn;    // button check flag 
 } objects_t;
 
 extern objects_t objects;
 
+extern bool submitted; 
 
-// typedef enum {
-//     COLOR_RUN    = 0xFF0000,
-//     COLOR_SLOW  = 0x00FF00,
-//     COLOR_STOP   = 0x0000FF,
-//     COLOR_IDLE = 0xFFFF00,
-//     COLOR_WHITE  = 0xFFFFFF,
-//     COLOR_BLACK  = 0x000000
-// } colors; 
-// // extern colors_t colors; 
 
 
 typedef enum {
@@ -60,7 +62,7 @@ static const char *label_strings[LABEL_COUNT] = {
     "IDLE",
     "RESUME",
     "REMARK",
-    "DROPDOWN"
+    "EXTRA"
 };
 
 

@@ -4,51 +4,87 @@
 #include <actions.h>
 #include <lvgl.h> 
 #include <screens.h>
+#include <globals.h>
+#include "mqtt_publisher.h"
+#include <Arduino.h> // for String lmao
 
-bool submitted = false; 
+
+
 
 // EVENT HANDLERS 
 void action_close_win(lv_event_t *e) {
     lv_obj_t *win = (lv_obj_t *)lv_event_get_user_data(e);
-    lv_obj_add_flag(win, LV_OBJ_FLAG_HIDDEN);   // hide window again
-    lv_obj_add_flag(objects.cfm_label, LV_OBJ_FLAG_HIDDEN);   // hide confirmation label
 
-    if (win == objects.remark_window || win == objects.dd_window) {
-        lv_obj_clear_state(objects.btn1, LV_STATE_DISABLED);
-        lv_obj_clear_state(objects.btn2, LV_STATE_DISABLED);
-        lv_obj_clear_state(objects.btnext, LV_STATE_DISABLED);
-    }
+    // RESET PANEL 
+    lv_obj_add_flag(objects.dd2, LV_OBJ_FLAG_HIDDEN);       // hide specifics dropdown
+    lv_obj_add_flag(win, LV_OBJ_FLAG_HIDDEN);               // hide window
+    lv_obj_clear_state(objects.btn1, LV_STATE_DISABLED);
+    lv_obj_clear_state(objects.btn2, LV_STATE_DISABLED);
+    lv_obj_clear_state(objects.btnext, LV_STATE_DISABLED);
 
-    // one of the buttons to be disabled
-    if (objects.trigbtn != NULL && submitted) {
+    /*
+    conditions of publishing: 1. for stops and resumes without autostops, submission approved
+                              2. resumes flag reason as autostops?
+    */
+
+    // if flag to publish approved, 
+    if (submitted && objects.trigbtn != NULL) {
         lv_obj_add_state(objects.trigbtn, LV_STATE_DISABLED);
-        submitted = false;
+
+        // STORE REASON AND REMARKS 
+        char buf[128]; 
+
+        lv_dropdown_get_selected_str(objects.dd1, buf, sizeof(buf));
+        strcpy(reason, buf);
+
+        // if a specific reason is given,
+        if (!lv_obj_has_flag(objects.dd2, LV_OBJ_FLAG_HIDDEN)) {
+            lv_dropdown_get_selected_str(objects.dd2, buf, sizeof(buf));
+            strcpy(specReason, buf);
+        } else {
+            strcpy(specReason, "n/a");  // default to n/a
+        }
+        // Copy remarks from textarea
+        strcpy(remark, lv_textarea_get_text(objects.rm_ta_dd));
+
+        char *json_str = generate_report_json(reason, specReason, remark);
+        if (json_str != NULL) {
+            if (objects.trigbtn == objects.btn1) {
+              queue_mqtt_publish(stop_topic, json_str, 0, false);
+            } else if (objects.trigbtn == objects.btn2) {
+              queue_mqtt_publish(resume_topic, json_str, 0, false);
+            }
+            free(json_str); 
+        } else {
+            ESP_LOGE(TAG, "Failed to create JSON string");
+        }
+
+        submitted = false;      // reset to false
+      
+      // special condition: no auto_stop flag detected on resume
+    } else if ((objects.trigbtn == objects.btn2) && !auto_stop_flag) {
+        char* json_str = generate_report_json("resume from auto stop", "n/a", "");
+        queue_mqtt_publish(resume_topic, json_str, 0, false);
+        free(json_str);
+        lv_obj_add_state(objects.btn2, LV_STATE_DISABLED);        // disable resume button
+    
+    // not submitted by default
+    } else if (objects.trigbtn != NULL) {
+        if (objects.trigbtn == objects.btn1) {    // if the stop hasnt been approved
+            lv_obj_add_state(objects.btn2, LV_STATE_DISABLED);    // the resume button remains disabled
+        } else if (objects.trigbtn == objects.btn2) {     // if the resume hasnt been submitted
+            lv_obj_add_state(objects.btn1, LV_STATE_DISABLED);    // the stop button remains disabled 
+        }
     }
 
     
-    // // Enable and disable buttons, based on if a confirmation has been submitted. 
-    // if (objects.trigbtn == objects.btn1) { // STOP button
-    //     if (submitted) {
-    //       // lv_obj_set_style_bg_color(objects.toppanel, lv_color_hex(get_color_hex(STOP)), LV_PART_MAIN | LV_STATE_DEFAULT);
-    //       // lv_label_set_text(objects.statuslabel, get_label_string(STOP));
-    //       lv_obj_add_state(objects.btn1, LV_STATE_DISABLED);  // already in stop, disable this button 
-    //       submitted = false;    // reset to false
-    //     } else {
-    //       lv_obj_add_state(objects.btn2, LV_STATE_DISABLED);  // still in resume, disable the resume button  
-    //     }
-    // }
-    // else if (objects.trigbtn == objects.btn2) { // RESUME button
-    //     if (submitted) {
-    //       // lv_obj_set_style_bg_color(objects.toppanel, lv_color_hex(get_color_hex(RUN)), LV_PART_MAIN | LV_STATE_DEFAULT);
-    //       // lv_label_set_text(objects.statuslabel, get_label_string(RUN));
-    //       lv_obj_add_state(objects.btn2, LV_STATE_DISABLED);  // already in resume, disable this button
-    //       submitted = false;
-    //     } else {
-    //       lv_obj_add_state(objects.btn1, LV_STATE_DISABLED);  // still in stop, disable the stop button  
-    //     }
-    // }
-  
+
     objects.trigbtn = NULL; // Reset after use
+
+    lv_dropdown_set_selected(objects.dd1, 0);
+    lv_dropdown_set_selected(objects.dd2, 0);
+    lv_textarea_set_text(objects.rm_ta_dd, "");              // blank out the option
+    lv_obj_add_state(objects.subbtn, LV_STATE_DISABLED);
 }
 
 
@@ -57,19 +93,28 @@ void action_btndd_handler(lv_event_t * e) {
   lv_event_code_t event_code = lv_event_get_code(e); 
   lv_obj_t *target = lv_event_get_target(e); 
   objects.trigbtn = target;                       // retain the button ptr that triggered the window
-  if (event_code == LV_EVENT_CLICKED || event_code == LV_EVENT_PRESSED) {
 
+  // pop up the reason window if (stop is pressed OR resume is pressed with autostop triggered)
+  if ((target == objects.btn2 && auto_stop_flag) || target == objects.btn1) { 
+
+    // display the reason window
     lv_obj_clear_flag(objects.dd_window, LV_OBJ_FLAG_HIDDEN);
-    // Disable other buttons
+    // disable other buttons 
     lv_obj_add_state(objects.btn1, LV_STATE_DISABLED);
     lv_obj_add_state(objects.btn2, LV_STATE_DISABLED);
     lv_obj_add_state(objects.btnext, LV_STATE_DISABLED);
-  } 
+
+    // // allow display of options on dd // COME BACK LATER 
+    // lv_dropdown_set_text(objects.dd1, NULL);
+    // lv_dropdown_set_text(objects.dd2, NULL);
+  } else {  // assuming this is the "no condition resume" 
+    lv_event_send(objects.closebtn, LV_EVENT_CLICKED, objects.dd_window); 
+  }
 }
 
 
 
-
+// submit button
 void action_subbtn_handler(lv_event_t * e){
 
   lv_event_code_t event_code = lv_event_get_code(e); 
@@ -83,6 +128,7 @@ void action_subbtn_handler(lv_event_t * e){
   } 
 }
 
+// confirmation box 
 void action_cfmbox_handler(lv_event_t * e) {
     lv_event_code_t event_code = lv_event_get_code(e); 
     lv_obj_t *target = lv_event_get_current_target(e); 
@@ -94,46 +140,30 @@ void action_cfmbox_handler(lv_event_t * e) {
 
         submitted = true; 
         if (objects.trigbtn == objects.btn1) {
-            lv_obj_set_style_bg_color(objects.toppanel, lv_color_hex(get_color_hex(STOP)), LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_label_set_text(objects.statuslabel, get_label_string(STOP));
+            set_top_panel_status(objects.toppanel, objects.statuslabel, STOP);
+            current_machine_state = STOP; 
             // lv_obj_add_state(objects.btn1, LV_STATE_DISABLED);  // already in stop, disable this button 
             // objects.trigbtn = objects.btn1;                     // save this other button to be enabled 
         } else if (objects.trigbtn == objects.btn2) { // RESUME button
-            lv_obj_set_style_bg_color(objects.toppanel, lv_color_hex(get_color_hex(RUN)), LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_label_set_text(objects.statuslabel, get_label_string(RUN));
+            set_top_panel_status(objects.toppanel, objects.statuslabel, RUN);
+            current_machine_state = RUN; 
             // lv_obj_add_state(objects.btn2, LV_STATE_DISABLED);  // already in resume, disable this button
             // objects.trigbtn = objects.btn2;                     // save this other button to be enabled 
         }
 
-        lv_obj_add_flag(objects.cfmbox, LV_OBJ_FLAG_HIDDEN);          // close pop up
-        // submitted = false; // reset to false
-
+        lv_event_send(objects.closebtn, LV_EVENT_CLICKED, objects.dd_window); // send event to close window
         
-    // if cancel, do nothing and close message box 
+        
+    // if cancel, do nothing
     } else if (strcmp(btn_text, "Cancel") == 0) {
         submitted = false;
-        // lv_obj_add_flag(objects.cfmbox, LV_OBJ_FLAG_HIDDEN);          // close pop up
-        // lv_obj_clear_state(objects.subbtn, LV_STATE_DISABLED);        // reenable submissions
+        lv_event_send(objects.dd1, LV_EVENT_VALUE_CHANGED, NULL);           // process the dropdown again to determine state of confirm button
     }
     
-    // close pop up either way
     lv_obj_add_flag(objects.cfmbox, LV_OBJ_FLAG_HIDDEN);          // close pop up
-    lv_obj_clear_state(objects.subbtn, LV_STATE_DISABLED);        // reenable submissions
+
 
 }
-
-// void action_btncfm_handler(lv_event_t * e) {
-//   // lv_event_code_t event_code = lv_event_get_code(e); 
-//   // lv_obj_t *target = lv_event_get_target(e); 
-//   // if (event_code == LV_EVENT_CLICKED || event_code == LV_EVENT_PRESSED) {
-//   //   lv_obj_clear_flag(objects.cfm_label, LV_OBJ_FLAG_HIDDEN);
-
-//   //   // enable the submit button
-//   //   lv_obj_clear_state(objects.subbtn, LV_STATE_DISABLED); 
-    
-//   // } 
-// }
-
 
 void action_ta_handler(lv_event_t * e){
     lv_event_code_t code = lv_event_get_code(e);
@@ -174,32 +204,61 @@ void action_kb_handler(lv_event_t * e) {
 
 }
 
-
+// dropdown option handler
 void action_dd_handler(lv_event_t * e){
 
     lv_event_code_t code = lv_event_get_code(e);
     lv_obj_t * dropdown = lv_event_get_target(e);
 
     if(code == LV_EVENT_VALUE_CHANGED) {
-        lv_obj_add_flag(objects.cfm_label, LV_OBJ_FLAG_HIDDEN);
 
         char buf[30]; 
+        uint8_t optind; 
         lv_dropdown_get_selected_str(dropdown, buf, sizeof(buf));
-        // Serial.println(buf);
+        optind = lv_dropdown_get_selected(dropdown);
 
-        if(strcmp(buf, "Special Option") == 0) {
-            lv_obj_clear_flag(objects.dd2, LV_OBJ_FLAG_HIDDEN); 
-            lv_obj_clear_flag(objects.dd2_label, LV_OBJ_FLAG_HIDDEN); 
-            // lv_obj_add_flag(objects.dd2, LV_OBJ_FLAG_CLICKABLE);
-            // lv_obj_clear_state(objects.dd2, LV_STATE_DISABLED);
-
-        } else {
-            lv_obj_add_flag(objects.dd2, LV_OBJ_FLAG_HIDDEN); 
-            lv_obj_add_flag(objects.dd2_label, LV_OBJ_FLAG_HIDDEN); 
-            // lv_obj_clear_flag(objects.dd2, LV_OBJ_FLAG_CLICKABLE);
-            // lv_obj_add_state(objects.dd2, LV_STATE_DISABLED);
+        if (strcmp(buf, "-") != 0) {
+              lv_obj_clear_state(objects.subbtn, LV_STATE_DISABLED);  // enable the submit button for the reason given
+          // filter special options only for the first dropdown
+          if (dropdown == objects.dd1) {
+              // hidden by default
+              lv_obj_add_flag(objects.dd2, LV_OBJ_FLAG_HIDDEN); 
+              lv_obj_add_flag(objects.dd2_label, LV_OBJ_FLAG_HIDDEN); 
+              lv_dropdown_set_selected(objects.dd2, 0);               // set to '-'
+              // im assuming the dropdowns have been updated upon call to READY, so the object index will find itself in the selection list
+              for (int i = 0; i < current_special_indices_count; i++) {
+                if (optind == current_special_indices[i]) {
+                // if (optind == DEMO_SPECIAL_OPTION_INDEX) {
+                  lv_obj_add_state(objects.subbtn, LV_STATE_DISABLED);  // disable the submit button since it will always fall to '-'  
+                  lv_obj_clear_flag(objects.dd2, LV_OBJ_FLAG_HIDDEN); 
+                  lv_obj_clear_flag(objects.dd2_label, LV_OBJ_FLAG_HIDDEN); 
+                  break;
+                }
+              }
+          }
+        } else { 
+            lv_obj_add_state(objects.subbtn, LV_STATE_DISABLED);  // disable the submit button if no reason given
         }
+    }
+}
 
+
+// update dropdown list 
+void action_ddupdate_handler(lv_event_t * e) {
+
+    lv_event_code_t code = lv_event_get_code(e);
+    lv_obj_t * dropdown = lv_event_get_target(e);
+
+    if (dropdown == objects.dd1 && ddd_update_required) {
+      update_current_reason(current_down_reason, latest_down_reason);
+      memcpy(current_special_indices, latest_special_indices, sizeof(int) * latest_special_indices_count);
+      current_special_indices_count = latest_special_indices_count;
+      lv_dropdown_set_options_static(dropdown, current_down_reason); 
+      ddd_update_required = false; 
+    } else if (dropdown == objects.dd2 && sdd_update_required) {
+      update_current_reason(current_station_reason, latest_station_reason);
+      lv_dropdown_set_options_static(dropdown, current_station_reason);
     }
 
 }
+

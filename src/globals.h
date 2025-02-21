@@ -28,8 +28,8 @@ extern char current_station_reason[MAX_OPTIONS_LENGTH];  // REC: current list of
 extern char latest_station_reason[MAX_OPTIONS_LENGTH];   // REC: latest list of down reasons, for dropdown updates
 extern int current_special_indices[MAX_OPTIONS_COUNT];   // REC: latest list of down reasons, for dropdown updates
 extern int latest_special_indices[MAX_OPTIONS_COUNT];   // REC: latest list of down reasons, for dropdown updates
-extern int current_special_indices_count;   // REC: latest list of down reasons, for dropdown updates
-extern int latest_special_indices_count;   // REC: latest list of down reasons, for dropdown updates
+extern uint8_t current_special_indices_count;   // REC: latest list of down reasons, for dropdown updates
+extern uint8_t latest_special_indices_count;   // REC: latest list of down reasons, for dropdown updates
 extern char remark[MAX_SELECTION_LENGTH];             // PUB: keyboard input remark
 extern char reason[MAX_SELECTION_LENGTH];             // PUB: reason selected from dropdown box
 extern char specReason[MAX_SELECTION_LENGTH];         // PUB: reason selected from dropdown box

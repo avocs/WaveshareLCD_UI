@@ -43,14 +43,15 @@ static lv_style_t style_title;
 const char *ssid        = "Tanand_Hardware"; // Enter your WiFi name
 const char *password    = "202040406060808010102020";  // Enter WiFi password
 // -----  MQTT BROKER SETTINGS -------
-// const char *mqtt_broker = "mqtt://tanandtech.com.my";
-const char *mqtt_broker = "mqtt://192.168.0.101/";
+const char *mqtt_broker = "mqtt://192.168.0.50/";
+const char* broker_username = "controller";
+const char* broker_pwd = "txcontroller";
+
+// const char *mqtt_broker = "mqtt://192.168.0.101/";
 const char *topic       = "random/test/esp32s3lcd-1";
 const char *r_topic     = "random/test/send";
 const int mqtt_port     = 1883;
 static const char* TAG  = "ESP32";
-
-// char buffers 
 
 // Counter
 int counter             = 0;
@@ -65,6 +66,11 @@ typedef struct {
   int qos;
   bool retain; 
 } PubMessage; 
+
+struct BottleData {
+    int count;
+    uint8_t full;
+};
 
 
 // MQTT TOPICS
@@ -122,7 +128,7 @@ void generate_dd_string_from_array(char *result, const char *options[], size_t o
     }
 }
 
-void find_special_indices(int *indices, int *count, const char *reasons[], int reasons_count, const char *specials[], int specials_count) {
+void find_special_indices(int *indices, uint8_t *count, const char *reasons[], int reasons_count, const char *specials[], int specials_count) {
     *count = 0;
     for (int i = 0; i < specials_count; ++i) {
         for (int j = 0; j < reasons_count; ++j) {
@@ -171,10 +177,12 @@ void parse_mqtt_payload(const char *topic, const char *payload) {
 
         cJSON *bottle = cJSON_GetObjectItem(root, "bottle");
         cJSON *full = cJSON_GetObjectItem(root, "full");
-        bottle_count = cJSON_GetNumberValue(bottle);
-        latest_full_state = cJSON_GetNumberValue(full);
-        Serial.printf("[UPDATE] Bottle Count: %d\n", bottle_count);
-        xQueueSend(countQueue, &bottle_count, pdMS_TO_TICKS(10));       // send count value to LVGL task
+
+        BottleData bottleData; 
+        bottleData.count = cJSON_GetNumberValue(bottle);
+        bottleData.full = cJSON_GetNumberValue(full);
+        Serial.printf("[UPDATE] Bottle Count: %d, Full State: %d\n", bottleData.count, bottleData.full);
+        xQueueSend(countQueue, &bottleData, pdMS_TO_TICKS(10));       // send count value to LVGL task
 
         cJSON_Delete(root);
 
@@ -190,6 +198,14 @@ void parse_mqtt_payload(const char *topic, const char *payload) {
         cJSON *status = cJSON_GetObjectItem(root, "status");
         cJSON *auto_stop = cJSON_GetObjectItem(root, "auto_stop");
         labels new_machine_state; 
+
+        if (cJSON_IsString(id)) {
+          strncpy(ID, id->valuestring, sizeof(ID) - 1);
+          ID[sizeof(ID) - 1] = '\0';
+          Serial.printf("[UPDATE] ID: %s\n", ID);
+        } else {
+            Serial.println("[ERROR] Missing or invalid 'id' field in JSON");
+        }
 
         // update machine state 
         if (cJSON_IsString(status)) {
@@ -209,7 +225,7 @@ void parse_mqtt_payload(const char *topic, const char *payload) {
                 break;
               } 
             }
-            
+
             if (new_machine_state != LABEL_COUNT) {
                 Serial.printf("[UPDATE] Machine State: %s (%d)\n", label_strings[new_machine_state], new_machine_state);
                 xQueueSend(statusQueue, &new_machine_state, pdMS_TO_TICKS(10));       // send status to queue
@@ -227,8 +243,6 @@ void parse_mqtt_payload(const char *topic, const char *payload) {
         } else {
             Serial.println("[ERROR] Missing or invalid 'auto_stop' field in JSON");
         }
-
-
 
         cJSON_Delete(root);
 
@@ -382,7 +396,7 @@ void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event
 
         case MQTT_EVENT_DATA:
             char topic[128];
-            char payload[128];
+            char payload[256];
             snprintf(topic, sizeof(topic), "%.*s", event->topic_len, event->topic);
             snprintf(payload, sizeof(payload), "%.*s", event->data_len, event->data);
 
@@ -433,6 +447,12 @@ void init_wifi_mqtt() {
         .address = {
           .uri = mqtt_broker,
         }
+      },
+      .credentials = {
+        .username = broker_username,
+        .authentication = {
+          .password = broker_pwd,
+        }
       }
   };
   client = esp_mqtt_client_init(&mqtt_cfg);
@@ -452,7 +472,7 @@ void mqttTask(void *pvParameters) {
             ESP_LOGI("MQTT_PUBLISH", "Published to %s: %s", msg.topic, msg.payload);
         }
 
-        vTaskDelay(10 / portTICK_PERIOD_MS); // Small delay to avoid CPU overload
+        vTaskDelay( 20 / portTICK_PERIOD_MS); // Small delay to avoid CPU overload
     } 
 }
 
@@ -460,26 +480,33 @@ void mqttTask(void *pvParameters) {
 void lvglTask(void *pvParameters) {
 
     int receivedValue;
+    BottleData receivedBottleData; 
 
     char receivedDownOptions[MAX_OPTIONS_LENGTH];
     char receivedStationOptions[MAX_OPTIONS_LENGTH];
     while (1) {
         
         // BOTTLE COUNT 
-        if (xQueueReceive(countQueue, &receivedValue, pdMS_TO_TICKS(10))) {
+        if (xQueueReceive(countQueue, &receivedBottleData, pdMS_TO_TICKS(10))) {
         
-            lv_label_set_text(objects.count, String(receivedValue).c_str());                            // update disp counter
+            lv_label_set_text(objects.count, String(receivedBottleData.count).c_str()); 
+            latest_full_state = receivedBottleData.full;             
 
-            if (latest_full_state != current_full_state) {                                                                           // update counter panel colour
-              lv_obj_set_style_bg_color(objects.midpanel, lv_color_hex(get_color_hex(FULL)), LV_PART_MAIN);
+            if (latest_full_state != current_full_state) { 
+              if (latest_full_state) {
+                  lv_obj_set_style_bg_color(objects.midpanel, lv_color_hex(get_color_hex(FULL)), LV_PART_MAIN);
+              } else {
+                  lv_obj_set_style_bg_color(objects.midpanel, lv_color_hex(get_color_hex(NOT_FULL)), LV_PART_MAIN);
+              }                                                                         
               current_full_state = latest_full_state;
-            } else {
-              lv_obj_set_style_bg_color(objects.midpanel, lv_color_hex(get_color_hex(NOT_FULL)), LV_PART_MAIN);
-            }
+            } 
+
         } 
 
         // STATUS UPDATE 
         if (xQueueReceive(statusQueue, &latest_machine_state, pdMS_TO_TICKS(10))) {
+
+            lv_label_set_text_fmt(objects.stationid, "Station ID: %s", ID);
         
             if (latest_machine_state != current_machine_state) {                                        // update status label
               current_machine_state = latest_machine_state;     // reassign machine state
@@ -487,13 +514,10 @@ void lvglTask(void *pvParameters) {
               button_check(objects.btn1, objects.btn2, (labels)current_machine_state);
             }
 
-            // i dah malas but i think might want to move the auto_stop update here 
         } 
-
 
         // DOWN REASON OPTIONS (store latest instead of updating directly);
         if (xQueueReceive(downoptionsQueue, receivedDownOptions, pdMS_TO_TICKS(10))) {
-            // lv_dropdown_set_options(objects.dd1, receivedOptions);
             strncpy(latest_down_reason, receivedDownOptions, MAX_OPTIONS_LENGTH - 1);
             latest_down_reason[MAX_OPTIONS_LENGTH - 1] = '\0';  // cuz strncpy doesnt copy over the null char
             if (strcmp(current_down_reason, latest_down_reason) != 0) {
@@ -517,9 +541,10 @@ void lvglTask(void *pvParameters) {
               sdd_update_required = false;                        
               Serial.println("[LVGL] Station reasons up to date."); 
             }
+
         }
 
-        vTaskDelay(20 / portTICK_PERIOD_MS); // Small delay to avoid CPU overload
+        vTaskDelay(10/ portTICK_PERIOD_MS); 
     }
 
 }
@@ -624,10 +649,10 @@ void init_lvgl()
 void setup(){
   Serial.begin(115200);
   init_lvgl(); 
-  // generate_topic_names_from_line(1);                  // LINE 1
+  // generate_topic_names_from_line(1);                  
   init_wifi_mqtt(); 
 
-  countQueue = xQueueCreate(5, sizeof(int));                // queue of 5 integers 
+  countQueue = xQueueCreate(5, sizeof(BottleData));                // queue of 5 integers 
   downoptionsQueue = xQueueCreate(5, MAX_OPTIONS_LENGTH);                      // queue of 5 strings, max length 256 
   stationoptionsQueue = xQueueCreate(5, MAX_OPTIONS_LENGTH);                      // queue of 5 strings, max length 256 
   statusQueue = xQueueCreate(5, sizeof(int));                      // queue of 5 strings, max length 256 
@@ -637,8 +662,8 @@ void setup(){
   }
   
   // all in same priority, will run in turns
-  xTaskCreatePinnedToCore(lvglTask, "LVGL Task", 4096, NULL, 1, NULL, 1);       // pin lvgl task to core 1
   xTaskCreatePinnedToCore(mqttTask, "MQTT Task", 4096, NULL, 1, NULL, 0);       // pin mqtt task to core 0 
+  xTaskCreatePinnedToCore(lvglTask, "LVGL Task", 4096, NULL, 2, NULL, 1);       // pin lvgl task to core 1
   xTaskCreatePinnedToCore(ntpTask, "NTP Task", 4096, NULL, 1, NULL, 0);         // pin ntp task to core 0 
 }
 

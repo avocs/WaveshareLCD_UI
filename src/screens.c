@@ -37,7 +37,7 @@ void create_screen_main() {
                     lv_obj_t *obj = lv_label_create(parent_obj);
                     objects.stationid = obj;
                     lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-                    lv_label_set_text(obj, "Station ID:");
+                    lv_label_set_text_fmt(obj, "Station ID: %s", "N/A");
                     lv_obj_set_style_align(obj, LV_ALIGN_LEFT_MID, LV_PART_MAIN | LV_STATE_DEFAULT);
                     lv_obj_set_style_text_font(obj, &lv_font_montserrat_16, LV_PART_MAIN | LV_STATE_DEFAULT);
 
@@ -180,7 +180,7 @@ void create_screen_main() {
             objects.closebtn = closebtn;
             lv_obj_add_event_cb(closebtn, action_close_win, LV_EVENT_CLICKED, obj);
 
-            lv_win_add_title(obj, " Title");
+            lv_win_add_title(obj, "REASON EDITOR");
             lv_obj_t * subbtn = lv_win_add_btn(obj, LV_SYMBOL_OK, 50);
             objects.subbtn = subbtn; 
             lv_obj_add_state(subbtn, LV_STATE_DISABLED);

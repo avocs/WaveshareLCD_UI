@@ -16,7 +16,6 @@ void action_close_win(lv_event_t *e) {
     lv_obj_t *win = (lv_obj_t *)lv_event_get_user_data(e);
 
     // RESET PANEL 
-    lv_obj_add_flag(objects.dd2, LV_OBJ_FLAG_HIDDEN);       // hide specifics dropdown
     lv_obj_add_flag(win, LV_OBJ_FLAG_HIDDEN);               // hide window
     lv_obj_clear_state(objects.btn1, LV_STATE_DISABLED);
     lv_obj_clear_state(objects.btn2, LV_STATE_DISABLED);
@@ -63,21 +62,22 @@ void action_close_win(lv_event_t *e) {
       
       // special condition: no auto_stop flag detected on resume
     } else if ((objects.trigbtn == objects.btn2) && !auto_stop_flag) {
-        char* json_str = generate_report_json("resume from auto stop", "n/a", "");
+        char* json_str = generate_report_json("No autostop", "n/a", "");
         queue_mqtt_publish(resume_topic, json_str, 0, false);
         free(json_str);
         lv_obj_add_state(objects.btn2, LV_STATE_DISABLED);        // disable resume button
     
     // not submitted by default
     } else if (objects.trigbtn != NULL) {
-        if (objects.trigbtn == objects.btn1) {    // if the stop hasnt been approved
-            lv_obj_add_state(objects.btn2, LV_STATE_DISABLED);    // the resume button remains disabled
-        } else if (objects.trigbtn == objects.btn2) {     // if the resume hasnt been submitted
-            lv_obj_add_state(objects.btn1, LV_STATE_DISABLED);    // the stop button remains disabled 
-        }
+        button_check(objects.btn1, objects.btn2, current_machine_state);
+
+        // if (objects.trigbtn == objects.btn1) {    // if the stop hasnt been approved
+        //     lv_obj_add_state(objects.btn2, LV_STATE_DISABLED);    // the resume button remains disabled
+        // } else if (objects.trigbtn == objects.btn2) {     // if the resume hasnt been submitted
+        //     lv_obj_add_state(objects.btn1, LV_STATE_DISABLED);    // the stop button remains disabled 
+        // }
     }
 
-    
 
     objects.trigbtn = NULL; // Reset after use
 
@@ -85,6 +85,8 @@ void action_close_win(lv_event_t *e) {
     lv_dropdown_set_selected(objects.dd2, 0);
     lv_textarea_set_text(objects.rm_ta_dd, "");              // blank out the option
     lv_obj_add_state(objects.subbtn, LV_STATE_DISABLED);
+    lv_obj_add_flag(objects.dd2, LV_OBJ_FLAG_HIDDEN);       // hide specifics dropdown
+
 }
 
 
@@ -94,8 +96,8 @@ void action_btndd_handler(lv_event_t * e) {
   lv_obj_t *target = lv_event_get_target(e); 
   objects.trigbtn = target;                       // retain the button ptr that triggered the window
 
-  // pop up the reason window if (stop is pressed OR resume is pressed with autostop triggered)
-  if ((target == objects.btn2 && auto_stop_flag) || target == objects.btn1) { 
+  // pop up the reason window if (autostop is on, or the stop button is pressed 
+  if (auto_stop_flag || target == objects.btn1) { 
 
     // display the reason window
     lv_obj_clear_flag(objects.dd_window, LV_OBJ_FLAG_HIDDEN);
@@ -104,11 +106,10 @@ void action_btndd_handler(lv_event_t * e) {
     lv_obj_add_state(objects.btn2, LV_STATE_DISABLED);
     lv_obj_add_state(objects.btnext, LV_STATE_DISABLED);
 
-    // // allow display of options on dd // COME BACK LATER 
-    // lv_dropdown_set_text(objects.dd1, NULL);
-    // lv_dropdown_set_text(objects.dd2, NULL);
-  } else {  // assuming this is the "no condition resume" 
-    lv_event_send(objects.closebtn, LV_EVENT_CLICKED, objects.dd_window); 
+  } else {  // assuming this is the "no condition resume", set to resume directly
+      set_top_panel_status(objects.toppanel, objects.statuslabel, RUN);
+      current_machine_state = RUN; 
+      lv_event_send(objects.closebtn, LV_EVENT_CLICKED, objects.dd_window);
   }
 }
 

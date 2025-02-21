@@ -11,6 +11,7 @@ typedef struct _objects_t {
     lv_obj_t *main;
     lv_obj_t *toppanel;
     lv_obj_t *stationid;
+    lv_obj_t *idlabel;
     lv_obj_t *statuslabel;
     lv_obj_t *midpanel;
     lv_obj_t *count;
@@ -29,7 +30,7 @@ typedef struct _objects_t {
     lv_obj_t *dd2;
     lv_obj_t *rm_label_dd;
     lv_obj_t *rm_ta_dd;
-    lv_obj_t *btncfm;
+    // lv_obj_t *btncfm;
     // lv_obj_t *cfm_label;
     lv_obj_t *closebtn;
     lv_obj_t *subbtn;

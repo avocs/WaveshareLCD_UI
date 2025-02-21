@@ -10,8 +10,8 @@ char current_station_reason[MAX_OPTIONS_LENGTH] = {0};
 char latest_station_reason[MAX_OPTIONS_LENGTH] = {0};
 int current_special_indices[] = {DEMO_SPECIAL_OPTION_INDEX};   // REC: latest list of down reasons, for dropdown updates
 int latest_special_indices[MAX_OPTIONS_COUNT];   // REC: latest list of down reasons, for dropdown updates
-int current_special_indices_count = 1;   // REC: la
-int latest_special_indices_count;   // REC: la
+uint8_t current_special_indices_count = 1;   // REC: la
+uint8_t latest_special_indices_count;   // REC: la
 char remark[MAX_SELECTION_LENGTH] = {0};
 char reason[MAX_SELECTION_LENGTH] = {0};
 char specReason[MAX_SELECTION_LENGTH] = {0};
